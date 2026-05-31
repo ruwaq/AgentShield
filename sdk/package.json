@@ -1,0 +1,28 @@
+{
+  "name": "@agentshield/sdk",
+  "version": "1.0.0",
+  "description": "Pre-execution risk guard SDK for autonomous agents on Somnia — just 3 lines to integrate",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": { "import": "./dist/index.mjs", "require": "./dist/index.js", "types": "./dist/index.d.ts" },
+    "./react": { "import": "./dist/react.mjs", "require": "./dist/react.js", "types": "./dist/react.d.ts" },
+    "./aegis": { "import": "./dist/aegis.mjs", "require": "./dist/aegis.js", "types": "./dist/aegis.d.ts" },
+    "./aegis-react": { "import": "./dist/aegis-react.mjs", "require": "./dist/aegis-react.js", "types": "./dist/aegis-react.d.ts" },
+    "./cli": "./cli.js"
+  },
+  "files": ["dist", "cli.js", "README.md"],
+  "scripts": {
+    "build": "tsup src/index.ts src/react.ts src/aegis.ts src/aegis-react.ts --format cjs,esm --dts --clean",
+    "dev": "tsup src/index.ts src/react.ts src/aegis.ts src/aegis-react.ts --format cjs,esm --dts --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": { "react": ">=18", "viem": "^2.21.0" },
+  "peerDependenciesMeta": { "react": { "optional": true } },
+  "dependencies": { "viem": "^2.21.0" },
+  "devDependencies": { "tsup": "^8.0.0", "typescript": "^5.5.0", "@types/react": "^18.3.0" },
+  "keywords": ["somnia", "agent", "security", "blockchain", "risk", "guard", "shield", "pre-execution"],
+  "repository": "github:Ande-Labs/AgentShield"
+}

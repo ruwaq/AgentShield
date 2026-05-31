@@ -1,0 +1,5 @@
+- [Audit Findings](audit_findings.md) — 14 hallazgos (1 crítico, 4 medium, 9 low/nit) en revisión profunda del 2026-05-28
+- [Session 2026-05-28](session_2026-05-28.md) — Estado completo: bug compilación activo, recursos Somnia, skills.sh análisis, próximos pasos
+- [Foundry Migration](foundry_migration.md) — Migración Hardhat→Foundry completada: 24 tests, forge scripts, MCP server, gas report
+- [AEGIS Master Plan](aegis_master_plan.md) — Plan maestro REFINADO post-investigación: 3 contratos (Brain/Create/Listen), SDK, DeFi Guardian demo, roadmap 6 días
+- [AEGIS Technical Research](aegis_technical_research.md) — Investigación técnica completa: APIs, direcciones, agentes, reactividad, AA, GitHub, costos, limitaciones

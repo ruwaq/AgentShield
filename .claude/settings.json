@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx hardhat *)",
+      "Bash(pnpm *)",
+      "Bash(corepack *)",
+      "Bash(git *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(find *)",
+      "Bash(mkdir *)",
+      "Bash(which *)"
+    ]
+  },
+  "skills": {
+    "security-auditor-blockchain": {
+      "enabled": true,
+      "description": "Auditoría de seguridad para contratos blockchain — usar antes de deploys y PRs críticos"
+    },
+    "test-driven-development": {
+      "enabled": true,
+      "description": "TDD — usar cuando se implementen tests para el contrato"
+    },
+    "systematic-debugging": {
+      "enabled": true,
+      "description": "Debugging sistemático para bugs en contratos o frontend"
+    },
+    "code-review": {
+      "enabled": true,
+      "description": "Code review comprehensiva con checklist de calidad"
+    }
+  }
+}
