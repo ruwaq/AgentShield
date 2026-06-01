@@ -9,7 +9,7 @@ import { agentShieldAbi } from "./abi";
 import "./styles.css";
 
 // ── Config ──
-const REGISTRY = (import.meta.env.VITE_AGENTSHIELD_REGISTRY || "0xE5F2F5f1D2e635a802e0d649cA769190E7209e80") as Address;
+const REGISTRY = (import.meta.env.VITE_AGENTSHIELD_REGISTRY || "0xC1CBD30b6078Ef5Ea2f25b23700c06d4e0a78ACe") as Address;
 const RPC = import.meta.env.VITE_RPC_URL || "https://api.infra.testnet.somnia.network/";
 const EXPLORER = import.meta.env.VITE_BLOCK_EXPLORER || "https://shannon-explorer.somnia.network";
 const AGENTS = import.meta.env.VITE_AGENT_EXPLORER || "https://agents.testnet.somnia.network";

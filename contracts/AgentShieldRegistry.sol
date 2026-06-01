@@ -5,10 +5,10 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {ISomniaAgents} from "./interfaces/ISomniaAgents.sol";
+import {ISomniaAgents, IAgentRequesterHandler} from "./interfaces/ISomniaAgents.sol";
 import {StringUtils} from "./libraries/StringUtils.sol";
 
-contract AgentShieldRegistry is Ownable2Step, Pausable, ReentrancyGuard {
+contract AgentShieldRegistry is Ownable2Step, Pausable, ReentrancyGuard, IAgentRequesterHandler {
     enum Decision { NONE, ALLOW, WARN, BLOCK }
     enum RiskLevel { UNKNOWN, LOW, MEDIUM, HIGH, CRITICAL }
     enum ActionType { TRANSFER, APPROVE, CONTRACT_CALL }
@@ -77,18 +77,26 @@ contract AgentShieldRegistry is Ownable2Step, Pausable, ReentrancyGuard {
         string memory prompt = _buildPrompt(policyId, policy, action, localDecision, localRisk, localReason);
         string[] memory allowed = new string[](3); allowed[0] = "ALLOW"; allowed[1] = "WARN"; allowed[2] = "BLOCK";
         bytes memory payload = abi.encodeWithSignature("inferString(string,string,bool,string[])", prompt, _systemPrompt(), false, allowed);
-        requestId = SOMNIA_AGENTS.createRequest{value: msg.value}(LLM_AGENT_ID, address(this), this.handleAgentResponse.selector, payload);
+        requestId = SOMNIA_AGENTS.createRequest{value: msg.value}(LLM_AGENT_ID, address(this), this.handleResponse.selector, payload);
         scans[scanId].requestId = requestId;
         requestToScan[requestId] = scanId;
         emit RiskRequested(scanId, requestId);
     }
 
-    function handleAgentResponse(uint256 requestId, bytes[] calldata responses, uint8 status, bytes calldata details) external {
+    /// @notice Callback invocado por Somnia Agents cuando el LLM termina la inferencia.
+    /// @dev Esta es la firma EXACTA que los validadores llaman. Si no coincide, el callback nunca llega.
+    ///      Usa Response[] memory (struct), no bytes[] — esa era la causa del bug anterior.
+    function handleResponse(
+        uint256 requestId,
+        ISomniaAgents.Response[] memory responses,
+        ISomniaAgents.ResponseStatus status,
+        ISomniaAgents.Request memory /* details */
+    ) external {
         if (msg.sender != address(SOMNIA_AGENTS)) revert UnauthorizedCallback();
         uint256 scanId = requestToScan[requestId];
         if (scanId == 0) revert InvalidPolicy();
         if (scans[scanId].finalized) revert AlreadyFinalized();
-        (Decision decision, uint256 riskScore, string memory reason) = _parseAgentResponse(responses, status, details);
+        (Decision decision, uint256 riskScore, string memory reason) = _parseAgentResponse(responses, status);
         _finalize(scanId, decision, riskScore, reason);
     }
 
@@ -102,9 +110,18 @@ contract AgentShieldRegistry is Ownable2Step, Pausable, ReentrancyGuard {
         return (Decision.ALLOW, 15, "Action is within deterministic policy checks.");
     }
 
-    function _parseAgentResponse(bytes[] calldata responses, uint8 status, bytes calldata details) internal pure returns (Decision, uint256, string memory) {
-        if (status != 2 || responses.length == 0) return (Decision.WARN, 60, string(abi.encodePacked("Somnia LLM response unavailable. detailsHash=", StringUtils.bytes32ToString(keccak256(details)))));
-        string memory raw = abi.decode(responses[0], (string)); bytes32 h = keccak256(bytes(raw));
+    /// @notice Parsea la respuesta del LLM desde el array de Response structs.
+    /// @dev Toma la primera respuesta del subcomité (todas son determinísticas si hay consenso).
+    ///      Status Success=2. Si no hay consenso o falló, defaultea a WARN (fail-safe).
+    function _parseAgentResponse(
+        ISomniaAgents.Response[] memory responses,
+        ISomniaAgents.ResponseStatus status
+    ) internal pure returns (Decision, uint256, string memory) {
+        if (status != ISomniaAgents.ResponseStatus.Success || responses.length == 0) {
+            return (Decision.WARN, 60, "Somnia LLM response unavailable or failed.");
+        }
+        string memory raw = abi.decode(responses[0].result, (string));
+        bytes32 h = keccak256(bytes(raw));
         if (h == keccak256(bytes("ALLOW"))) return (Decision.ALLOW, 20, "Somnia LLM returned ALLOW.");
         if (h == keccak256(bytes("WARN"))) return (Decision.WARN, 60, "Somnia LLM returned WARN.");
         if (h == keccak256(bytes("BLOCK"))) return (Decision.BLOCK, 95, "Somnia LLM returned BLOCK.");

@@ -10,6 +10,10 @@ solc_version = "0.8.24"
 optimizer = true
 optimizer_runs = 200
 via_ir = true
+# NOTA: Somnia NO soporta opcodes Cancun (TSTORE/TLOAD/MCOPY) en mainnet/testnet.
+# Sin embargo, OpenZeppelin v5 requiere cancun para compilar (usa mcopy en Bytes.sol).
+# Para deploy en Somnia, verifica que el bytecode no contenga MCOPY.
+# Si es necesario, baja OZ a v4.9.x que no depende de mcopy.
 evm_version = "cancun"
 
 [rpc_endpoints]

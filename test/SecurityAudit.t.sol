@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {AgentShieldRegistry} from "../contracts/AgentShieldRegistry.sol";
+import {ISomniaAgents} from "../contracts/interfaces/ISomniaAgents.sol";
 
 contract SecurityAuditTest is Test {
     AgentShieldRegistry public registry;
@@ -48,6 +49,27 @@ contract SecurityAuditTest is Test {
         });
     }
 
+    /// @dev Helper: construye un Response[] con la nueva firma de handleResponse
+    function _mkResponses(string memory result) internal pure returns (ISomniaAgents.Response[] memory) {
+        ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
+        responses[0] = ISomniaAgents.Response({
+            validator: address(0),
+            result: abi.encode(result),
+            status: ISomniaAgents.ResponseStatus.Success,
+            receipt: 0,
+            timestamp: 0,
+            executionCost: 0
+        });
+        return responses;
+    }
+
+    /// @dev Helper: Request vacío para tests que no dependen de details
+    function _emptyRequest() internal pure returns (ISomniaAgents.Request memory) {
+        // Retorna un Request con valores default (todos cero/vacío)
+        ISomniaAgents.Request memory req;
+        return req;
+    }
+
     // ═══════════════════════════════════════════════════════════
     // VECTOR 1: Reentrancy Attack
     // ¿Puede submitAction ser re-entrado vía callback malicioso?
@@ -68,16 +90,16 @@ contract SecurityAuditTest is Test {
         // The attacker cannot re-enter submitAction because:
         // 1. DummyPlatform doesn't call back (so no reentrancy path exists)
         // 2. Even if callback existed, nonReentrant would block re-entry
-        // 3. handleAgentResponse has its own access control (only platform)
+        // 3. handleResponse has its own access control (only platform)
 
         // This test validates the design is reentrancy-safe by architecture,
         // not just by modifier. The callback pattern (external contract calls back)
-        // is protected by the UnauthorizedCallback check on handleAgentResponse.
+        // is protected by the UnauthorizedCallback check on handleResponse.
     }
 
     function test_reentrancy_createRequest_callbackCannotReenter() public {
-        // handleAgentResponse no puede ser llamado desde submitAction
-        // porque submitAction es nonReentrant y handleAgentResponse
+        // handleResponse no puede ser llamado desde submitAction
+        // porque submitAction es nonReentrant y handleResponse
         // es llamado por Somnia Agents, no por el mismo contrato
         uint256 pid = _createPolicyWithTarget(user);
 
@@ -97,28 +119,28 @@ contract SecurityAuditTest is Test {
         uint256 pid = _createPolicyWithTarget(user);
         vm.prank(user);
         (uint256 scanId,) = registry.submitAction(pid, _action(0, 10 ether, "test"));
+        scanId;
 
-        bytes[] memory responses = new bytes[](1);
-        responses[0] = abi.encode("ALLOW");
+        ISomniaAgents.Response[] memory responses = _mkResponses("ALLOW");
 
-        // Attacker tries to call handleAgentResponse directly
+        // Attacker tries to call handleResponse directly
         vm.prank(attacker);
         vm.expectRevert(AgentShieldRegistry.UnauthorizedCallback.selector);
-        registry.handleAgentResponse(1, responses, 2, "");
+        registry.handleResponse(1, responses, ISomniaAgents.ResponseStatus.Success, _emptyRequest());
     }
 
     function test_attack_callbackSpoofing_ownerCantCallback() public {
         uint256 pid = _createPolicyWithTarget(user);
         vm.prank(user);
         (uint256 scanId,) = registry.submitAction(pid, _action(0, 10 ether, "test"));
+        scanId;
 
-        bytes[] memory responses = new bytes[](1);
-        responses[0] = abi.encode("ALLOW");
+        ISomniaAgents.Response[] memory responses = _mkResponses("ALLOW");
 
         // Even the contract owner can't fake a callback
         vm.prank(owner);
         vm.expectRevert(AgentShieldRegistry.UnauthorizedCallback.selector);
-        registry.handleAgentResponse(1, responses, 2, "");
+        registry.handleResponse(1, responses, ISomniaAgents.ResponseStatus.Success, _emptyRequest());
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -134,7 +156,7 @@ contract SecurityAuditTest is Test {
         assertTrue(registry.getScan(scanId).finalized);
 
         // scanId=1 has requestId=0 (blocked deterministically, no LLM call)
-        // handleAgentResponse checks requestToScan[requestId] → 0 → InvalidPolicy
+        // handleResponse checks requestToScan[requestId] → 0 → InvalidPolicy
         // This is correct behavior: blocked scans have no LLM request associated
 
         // Test with a scan that went to LLM (not blocked locally):
@@ -144,7 +166,7 @@ contract SecurityAuditTest is Test {
         (scanId,) = registry.submitAction(pid, _action(0, 10 ether, "safe"));
         // But DummyPlatform doesn't call back, so scan isn't finalized
         assertFalse(registry.getScan(scanId).finalized);
-        // A second handleAgentResponse on the same requestId would revert
+        // A second handleResponse on the same requestId would revert
         // with AlreadyFinalized IF the first one had finalized it.
         // Since DummyPlatform returns requestId=1 for all, the second call
         // would hit the same scanId and get AlreadyFinalized check.
@@ -161,7 +183,7 @@ contract SecurityAuditTest is Test {
         // The _finalize function checks riskScore <= 100
         // We can't call _finalize directly (internal), but we can verify
         // that any code path reaching _finalize with riskScore > 100 reverts.
-        // The only path is through handleAgentResponse which is gated by platform address.
+        // The only path is through handleResponse which is gated by platform address.
         // We test via the contract logic: _parseAgentResponse always returns <= 100.
     }
 
@@ -270,20 +292,28 @@ contract SecurityAuditTest is Test {
     // ═══════════════════════════════════════════════════════════
 
     function test_attack_llmResponse_injectMalformedResponse() public {
-        // The _parseAgentResponse parses responses[0] as abi.decode(string)
+        // The _parseAgentResponse parses responses[0].result as abi.decode(string)
         // Malformed bytes will revert the callback, leaving scan unfinalized
         uint256 pid = _createPolicyWithTarget(user);
         vm.prank(user);
         (uint256 scanId,) = registry.submitAction(pid, _action(0, 10 ether, "test"));
+        scanId;
 
-        bytes[] memory responses = new bytes[](1);
+        ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
         // Malformed: not a valid ABI-encoded string
-        responses[0] = hex"deadbeef";
+        responses[0] = ISomniaAgents.Response({
+            validator: address(0),
+            result: hex"deadbeef",
+            status: ISomniaAgents.ResponseStatus.Success,
+            receipt: 0,
+            timestamp: 0,
+            executionCost: 0
+        });
 
         vm.prank(platform);
         // This should revert because abi.decode will fail on malformed bytes
         vm.expectRevert();
-        registry.handleAgentResponse(1, responses, 2, "");
+        registry.handleResponse(1, responses, ISomniaAgents.ResponseStatus.Success, _emptyRequest());
     }
 
     function test_attack_llmResponse_emptyResponseArray() public {
@@ -291,11 +321,11 @@ contract SecurityAuditTest is Test {
         vm.prank(user);
         (uint256 scanId,) = registry.submitAction(pid, _action(0, 10 ether, "test"));
 
-        bytes[] memory responses = new bytes[](0);
+        ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](0);
 
         vm.prank(platform);
-        // Empty responses + status=2 → WARN (handled gracefully)
-        registry.handleAgentResponse(1, responses, 2, "");
+        // Empty responses + status=Success → WARN (handled gracefully)
+        registry.handleResponse(1, responses, ISomniaAgents.ResponseStatus.Success, _emptyRequest());
         AgentShieldRegistry.Scan memory scan = registry.getScan(scanId);
         assertEq(uint8(scan.decision), DECISION_WARN); // Falls back to WARN
     }
@@ -305,12 +335,11 @@ contract SecurityAuditTest is Test {
         vm.prank(user);
         (uint256 scanId,) = registry.submitAction(pid, _action(0, 10 ether, "test"));
 
-        bytes[] memory responses = new bytes[](1);
-        responses[0] = abi.encode("BLOCK");
+        ISomniaAgents.Response[] memory responses = _mkResponses("BLOCK");
 
-        // status=1 means error, should fallback to WARN even if response says BLOCK
+        // status=Failed, should fallback to WARN even if response says BLOCK
         vm.prank(platform);
-        registry.handleAgentResponse(1, responses, 1, hex"dead");
+        registry.handleResponse(1, responses, ISomniaAgents.ResponseStatus.Failed, _emptyRequest());
         AgentShieldRegistry.Scan memory scan = registry.getScan(scanId);
         assertEq(uint8(scan.decision), DECISION_WARN); // Error → WARN
         assertEq(scan.riskScore, 60); // Error fallback score
@@ -321,11 +350,10 @@ contract SecurityAuditTest is Test {
         vm.prank(user);
         (uint256 scanId,) = registry.submitAction(pid, _action(0, 10 ether, "test"));
 
-        bytes[] memory responses = new bytes[](1);
-        responses[0] = abi.encode("MAYBE"); // Not ALLOW/WARN/BLOCK
+        ISomniaAgents.Response[] memory responses = _mkResponses("MAYBE"); // Not ALLOW/WARN/BLOCK
 
         vm.prank(platform);
-        registry.handleAgentResponse(1, responses, 2, "");
+        registry.handleResponse(1, responses, ISomniaAgents.ResponseStatus.Success, _emptyRequest());
         AgentShieldRegistry.Scan memory scan = registry.getScan(scanId);
         // Unexpected output → WARN with risk 70
         assertEq(uint8(scan.decision), DECISION_WARN);
@@ -402,21 +430,19 @@ contract SecurityAuditTest is Test {
 
     function test_edge_requestIdZero_shouldRevert() public {
         // requestId=0 is used as "no request" sentinel
-        bytes[] memory responses = new bytes[](1);
-        responses[0] = abi.encode("ALLOW");
+        ISomniaAgents.Response[] memory responses = _mkResponses("ALLOW");
 
         vm.prank(platform);
         vm.expectRevert(AgentShieldRegistry.InvalidPolicy.selector); // scanId==0 check
-        registry.handleAgentResponse(0, responses, 2, "");
+        registry.handleResponse(0, responses, ISomniaAgents.ResponseStatus.Success, _emptyRequest());
     }
 
-    function test_edge_handleAgentResponse_nonexistentRequest() public {
-        bytes[] memory responses = new bytes[](1);
-        responses[0] = abi.encode("ALLOW");
+    function test_edge_handleResponse_nonexistentRequest() public {
+        ISomniaAgents.Response[] memory responses = _mkResponses("ALLOW");
 
         vm.prank(platform);
         vm.expectRevert(AgentShieldRegistry.InvalidPolicy.selector); // scanId==0
-        registry.handleAgentResponse(999999, responses, 2, "");
+        registry.handleResponse(999999, responses, ISomniaAgents.ResponseStatus.Success, _emptyRequest());
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -475,7 +501,12 @@ contract SecurityAuditTest is Test {
 // ═══════════════════════════════════════════════════════════
 
 contract DummyPlatform {
-    function createRequest(uint256, address, bytes4, bytes calldata) external payable returns (uint256) {
+    function createRequest(
+        uint256 /* agentId */,
+        address /* callbackAddress */,
+        bytes4 /* callbackSelector */,
+        bytes calldata /* payload */
+    ) external payable returns (uint256 requestId) {
         return 1;
     }
 }

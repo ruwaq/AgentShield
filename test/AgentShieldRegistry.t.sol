@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {AgentShieldRegistry} from "../contracts/AgentShieldRegistry.sol";
+import {ISomniaAgents} from "../contracts/interfaces/ISomniaAgents.sol";
 
 contract AgentShieldRegistryTest is Test {
     AgentShieldRegistry public registry;
@@ -273,24 +274,39 @@ contract AgentShieldRegistryTest is Test {
         registry.setAllowedSelector(pid, SELECTOR, true);
     }
 
-    function test_handleAgentResponse_revertsUnauthorized() public {
+    function test_handleResponse_revertsUnauthorized() public {
         uint256 pid = _createPolicyWithTarget(user);
         vm.prank(user);
         (uint256 scanId,) = registry.submitAction(pid, _safeTransfer());
+        scanId;
         // Dummy platform didn't call back, so scan is not finalized.
-        // Try calling handleAgentResponse from a non-platform address
-        bytes[] memory responses = new bytes[](1);
-        responses[0] = abi.encode("ALLOW");
+        // Try calling handleResponse from a non-platform address
+        ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
+        responses[0] = ISomniaAgents.Response({
+            validator: address(0),
+            result: abi.encode("ALLOW"),
+            status: ISomniaAgents.ResponseStatus.Success,
+            receipt: 0,
+            timestamp: block.timestamp,
+            executionCost: 0
+        });
+        ISomniaAgents.Request memory details;
         vm.prank(user);
         vm.expectRevert(AgentShieldRegistry.UnauthorizedCallback.selector);
-        registry.handleAgentResponse(1, responses, 2, "");
+        registry.handleResponse(1, responses, ISomniaAgents.ResponseStatus.Success, details);
     }
 }
 
 /// @dev Minimal contract that accepts createRequest without reverting.
 /// Does NOT call back, so scans pass through to LLM but stay unfinalized.
+/// Uses the exact IAgentRequester signature so the ABI matches the real platform.
 contract DummyPlatform {
-    function createRequest(uint256, address, bytes4, bytes calldata) external payable returns (uint256) {
+    function createRequest(
+        uint256 /* agentId */,
+        address /* callbackAddress */,
+        bytes4 /* callbackSelector */,
+        bytes calldata /* payload */
+    ) external payable returns (uint256 requestId) {
         return 1;
     }
 }

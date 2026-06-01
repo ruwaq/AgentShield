@@ -2,8 +2,8 @@
 pragma solidity ^0.8.24;
 
 /// @title ISomniaAgents — Interfaz completa de la plataforma de agentes de Somnia
-/// @notice Datos verificados on-chain contra el contrato deployado en testnet (2026-05-29)
-/// @dev La plataforma es un proxy UUPS. Implementación: 0xc49e656bd0396f42320854c66bc5f96908a17e87
+/// @notice Datos verificados on-chain contra docs.somnia.network (2026-06-01)
+/// @dev La plataforma es un proxy UUPS en testnet: 0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776
 interface ISomniaAgents {
     // ─── Requests ───────────────────────────────────────────
 
@@ -75,4 +75,22 @@ interface ISomniaAgents {
         uint256 remainingBudget;
         uint256 perAgentBudget;
     }
+}
+
+/// @title IAgentRequesterHandler — Interfaz que debe implementar el contrato que recibe el callback
+/// @notice Esta es la firma EXACTA que los validadores de Somnia invocan al finalizar un request.
+/// @dev Si la firma no coincide, el callback nunca llega (el selector no hace match).
+///      Los tipos Response, ResponseStatus y Request se referencian desde ISomniaAgents.
+interface IAgentRequesterHandler {
+    /// @notice Callback invocado por la plataforma cuando un request se completa
+    /// @param requestId ID del request retornado por createRequest
+    /// @param responses Array de respuestas de cada validador del subcomité (default 3)
+    /// @param status Estado final del request (Success=2, Failed=3, TimedOut=4)
+    /// @param details Struct completo con los detalles del request
+    function handleResponse(
+        uint256 requestId,
+        ISomniaAgents.Response[] memory responses,
+        ISomniaAgents.ResponseStatus status,
+        ISomniaAgents.Request memory details
+    ) external;
 }
