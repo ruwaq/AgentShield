@@ -1,22 +1,64 @@
-# Submission Summary
+# OKX AI Genesis Hackathon — Submission Summary
 
-AgentShield is a pre-execution risk guard for autonomous agents on Somnia. Before an autonomous agent acts on-chain, AgentShield checks the action against a policy and uses a Somnia LLM Agent to return `ALLOW`, `WARN`, or `BLOCK`.
+> **ASP Name:** AgentShield
+> **Category:** Software Utility / Finance Copilot
+> **Type:** Agent-to-MCP (A2MCP)
+> **Deadline:** July 17, 2026, 23:59 UTC
 
-## What It Does
+---
 
-1. **Policy Creation:** Users define security policies (max spend, allowed targets, allowed selectors)
-2. **Action Submission:** Agents submit proposed actions before execution
-3. **Deterministic Check:** Hard blocks for policy violations (no LLM cost)
-4. **LLM Inference:** Actions within policy are analyzed by Somnia's LLM agent
-5. **Verdict:** `ALLOW` (safe), `WARN` (caution), or `BLOCK` (dangerous)
+## What AgentShield Does
+
+AgentShield is a **pre-execution security firewall** for autonomous AI agents. Before an agent executes an on-chain action, AgentShield analyzes it against a user-defined security policy and returns a verdict: `ALLOW`, `WARN`, or `BLOCK` with a risk score (0-100).
+
+### Flow:
+```
+Agent → "Should I approve this 100 USDC transfer?"
+              ↓
+     AgentShield ASP (MCP)
+              ↓
+     ┌────────────────────────┐
+     │ 1. Deterministic check  │ ← Instant, free
+     │ 2. LLM deep analysis    │ ← Somnia Agents Platform
+     │ 3. Verdict + risk score │
+     └────────────────────────┘
+              ↓
+     { verdict: "BLOCK", riskScore: 95, reason: "Unlimited approval to unknown contract" }
+```
+
+---
 
 ## Technical Highlights
 
-- **Single contract** (~140 LOC Solidity) + React frontend (~330 LOC) — no backend
-- **Foundry-native tests:** 171 tests, all passing
-- **Somnia-native:** Uses Somnia Agents Platform for trustless LLM inference with 3-validator consensus
-- **Fail-safe by design:** Unexpected LLM output defaults to `WARN`, never `ALLOW`
-- **Gas-efficient:** Deterministic blocks skip LLM inference entirely
+- **Dual-chain architecture:** Smart contracts on Somnia Testnet (LLM inference), ASP listing on OKX.AI (distribution)
+- **171 tests, 0 failures** — production-ready, not a hackathon prototype
+- **Deterministic-first:** Hard policy violations blocked instantly (zero gas for LLM)
+- **Fail-safe by design:** Unexpected LLM output → `WARN` (never `ALLOW`). No prompt injection can bypass.
+- **On-chain verifiability:** All scans stored permanently. Complete audit trail.
+- **7 Solidity contracts** (~1,500 LOC total) + React frontend + MCP endpoint
+
+---
+
+## Why AgentShield Wins
+
+| Category | Why We Win |
+|----------|------------|
+| **Best Product** | Complete, tested, production-ready. 171 tests. Real security value. |
+| **Software Utility** | Directly protects AI agents from scams, phishing, and policy violations. |
+| **Finance Copilot** | Critical for DeFi agents — prevents rug pulls, unlimited approvals, and overspending. |
+| **Creative Genius** | First on-chain security firewall for autonomous agents. NFT guardians with AI souls. |
+
+---
+
+## Links
+
+- **ASP on OKX.AI:** (after listing)
+- **Smart Contracts (Somnia Testnet):** `0xBb20e7AD47DdA5f8e51A2B1e89E9523c1c686253`
+- **Somnia Agents Explorer:** https://agents.testnet.somnia.network
+- **GitHub:** (repo URL)
+- **Demo Video:** (after recording)
+
+---
 
 ## Key Learnings (Somnia Integration)
 
@@ -43,13 +85,3 @@ interface IAgentRequesterHandler {
 ### Agent IDs
 - LLM Inference: `12847293847561029384` (0.07 SOMI/agent)
 - LLM Parse Website: `12875401142070969085` (0.10 SOMI/agent)
-
-### Deposit Formula
-`msg.value = getRequestDeposit() + (perAgentPrice × subcommitteeSize)`
-
-## Links
-
-- Contract (testnet): `0xBb20e7AD47DdA5f8e51A2B1e89E9523c1c686253`
-- Somnia Agents: https://agents.testnet.somnia.network
-- Docs: https://docs.somnia.network
-- Receipts API: https://receipts.testnet.agents.somnia.host/agent-receipts
