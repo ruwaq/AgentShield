@@ -28,13 +28,37 @@ library StringUtils {
     }
 
     /// @notice Convierte un address a string hexadecimal (0x...)
+    /// @dev Produce 42 caracteres (0x + 40 hex chars para 20 bytes).
+    ///      Antes producía 66 caracteres (bytes32 rellenado con ceros), lo que
+    ///      contaminaba el contexto del LLM y desperdiciaba gas de almacenamiento.
     function addrToString(address a) internal pure returns (string memory) {
-        return bytes32ToString(bytes32(uint256(uint160(a))));
+        bytes memory alphabet = "0123456789abcdef";
+        bytes memory str = new bytes(42);
+        str[0] = "0";
+        str[1] = "x";
+        uint160 addr = uint160(a);
+        for (uint256 i = 0; i < 20; i++) {
+            uint8 b = uint8(addr >> (8 * (19 - i)));
+            str[2 + i * 2] = alphabet[b >> 4];
+            str[3 + i * 2] = alphabet[b & 0x0f];
+        }
+        return string(str);
     }
 
     /// @notice Convierte un bytes4 a string hexadecimal (0x...)
+    /// @dev Produce 10 caracteres (0x + 8 hex chars para 4 bytes).
+    ///      Antes producía 66 caracteres (bytes32 rellenado con ceros), lo que
+    ///      contaminaba el contexto del LLM y desperdiciaba gas de almacenamiento.
     function bytes4ToString(bytes4 b) internal pure returns (string memory) {
-        return bytes32ToString(bytes32(b));
+        bytes memory alphabet = "0123456789abcdef";
+        bytes memory str = new bytes(10);
+        str[0] = "0";
+        str[1] = "x";
+        for (uint256 i = 0; i < 4; i++) {
+            str[2 + i * 2] = alphabet[uint256(uint8(b[i] >> 4))];
+            str[3 + i * 2] = alphabet[uint256(uint8(b[i] & 0x0f))];
+        }
+        return string(str);
     }
 
     /// @notice Convierte un bytes32 a string hexadecimal (0x...)

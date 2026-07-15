@@ -62,6 +62,9 @@ contract AegisBrainV2 is ReentrancyGuard {
     ISomniaAgents public immutable SOMNIA_AGENTS;
     uint256 public immutable LLM_AGENT_ID;
 
+    /// @notice Dueño del contrato (para funciones administrativas restringidas)
+    address public immutable OWNER;
+
     /// @notice Perfiles de seguridad por usuario
     mapping(address => SecurityProfile) public profiles;
 
@@ -97,6 +100,7 @@ contract AegisBrainV2 is ReentrancyGuard {
     error EmptyIntent();
     error InsufficientDeposit();
     error InsufficientContractBalance();
+    error UnauthorizedAccess();
 
     // ═══════════════════════════════════════════════════════════
     //                       CONSTRUCTOR
@@ -105,6 +109,7 @@ contract AegisBrainV2 is ReentrancyGuard {
     constructor(address platform, uint256 agentId) {
         SOMNIA_AGENTS = ISomniaAgents(platform);
         LLM_AGENT_ID = agentId == 0 ? 12847293847561029384 : agentId;
+        OWNER = msg.sender;
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -185,7 +190,7 @@ contract AegisBrainV2 is ReentrancyGuard {
         uint256 requestId = SOMNIA_AGENTS.createRequest{value: deposit}(
             LLM_AGENT_ID,
             address(this),
-            this.handleAgentResponse.selector,
+            this.handleResponse.selector,
             payload
         );
 
@@ -246,7 +251,7 @@ contract AegisBrainV2 is ReentrancyGuard {
         uint256 requestId = SOMNIA_AGENTS.createRequest{value: deposit}(
             LLM_AGENT_ID,
             address(this),
-            this.handleAgentResponse.selector,
+            this.handleResponse.selector,
             payload
         );
 
@@ -259,17 +264,15 @@ contract AegisBrainV2 is ReentrancyGuard {
     // ═══════════════════════════════════════════════════════════
 
     /// @notice Completa manualmente un análisis con una respuesta simulada del LLM.
-    /// @dev Solo para testnet/demo. En producción, el callback de Somnia llama a handleAgentResponse.
-    ///      Permite probar el flujo completo sin depender del callback automático.
+    /// @dev RESTRINGIDO al OWNER del contrato. Solo para testnet/demo.
+    ///      En producción, el callback de Somnia llama a handleResponse.
     function fulfillManual(
         uint256 analysisId,
         string memory llmResponse
     ) external {
+        if (msg.sender != OWNER) revert UnauthorizedAccess();
         AnalysisState storage state = analyses[analysisId];
         if (state.owner == address(0)) revert AnalysisNotFound();
-
-        // Solo el owner del análisis puede hacer fulfill
-        if (msg.sender != state.owner) revert UnauthorizedCallback();
 
         // Clasificar la respuesta
         (string memory verdict, uint256 riskScore, string memory reasoning) = _classifyResponse(llmResponse);
@@ -303,11 +306,14 @@ contract AegisBrainV2 is ReentrancyGuard {
     //              CALLBACK DE SOMNIA
     // ═══════════════════════════════════════════════════════════
 
-    function handleAgentResponse(
+    /// @notice Callback invocado por Somnia Agents cuando un request se completa.
+    /// @dev Esta es la firma EXACTA que los validadores llaman. Si no coincide, el callback nunca llega.
+    ///      Usa Response[] (struct), no bytes[] — esa era la causa del bug anterior.
+    function handleResponse(
         uint256 requestId,
-        bytes[] calldata responses,
-        uint8 status,
-        bytes calldata /* details */
+        ISomniaAgents.Response[] calldata responses,
+        ISomniaAgents.ResponseStatus status,
+        ISomniaAgents.Request calldata /* details */
     ) external {
         if (msg.sender != address(SOMNIA_AGENTS)) revert UnauthorizedCallback();
 
@@ -316,8 +322,8 @@ contract AegisBrainV2 is ReentrancyGuard {
 
         AnalysisState storage state = analyses[analysisId];
 
-        // Status 2 = Success
-        if (status != 2 || responses.length == 0) {
+        // Status Success = 2
+        if (status != ISomniaAgents.ResponseStatus.Success || responses.length == 0) {
             // Falló — guardar como WARN por seguridad
             SecurityDecision memory fallbackDecision = SecurityDecision({
                 verdict: "WARN",
@@ -334,8 +340,8 @@ contract AegisBrainV2 is ReentrancyGuard {
             return;
         }
 
-        // Decodificar respuesta del LLM
-        string memory llmResponse = abi.decode(responses[0], (string));
+        // Decodificar respuesta del LLM desde el struct Response
+        string memory llmResponse = abi.decode(responses[0].result, (string));
 
         // Clasificar la respuesta
         (string memory verdict, uint256 riskScore, string memory reasoning) = _classifyResponse(llmResponse);

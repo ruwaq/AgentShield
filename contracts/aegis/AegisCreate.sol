@@ -51,6 +51,9 @@ contract AegisCreate is ERC721, AegisBrain {
     /// @notice Owner del contrato (para withdraw y ajustes)
     address public contractOwner;
 
+    /// @notice Contratos autorizados para llamar recordBattle (ej. AegisListen)
+    mapping(address => bool) public authorizedCallers;
+
     // ═══════════════════════════════════════════════════════════
     //                         EVENTOS
     // ═══════════════════════════════════════════════════════════
@@ -80,6 +83,11 @@ contract AegisCreate is ERC721, AegisBrain {
         string memoryText
     );
 
+    event AuthorizedCallerUpdated(
+        address indexed caller,
+        bool authorized
+    );
+
     // ═══════════════════════════════════════════════════════════
     //                         ERRORES
     // ═══════════════════════════════════════════════════════════
@@ -89,6 +97,7 @@ contract AegisCreate is ERC721, AegisBrain {
     error NotTokenOwner();
     error AlreadyRevealed();
     error NotContractOwner();
+    error UnauthorizedCaller();
 
     // ═══════════════════════════════════════════════════════════
     //                       CONSTRUCTOR
@@ -166,8 +175,9 @@ contract AegisCreate is ERC721, AegisBrain {
     // ═══════════════════════════════════════════════════════════
 
     /// @notice Registra una batalla/protección y hace evolucionar al guardián
-    /// @dev Llamado por AegisListen o por el SDK después de una acción de seguridad.
-    ///      Cada 5 batallas = 1 nivel. Cada 3 victorias = nuevo trait.
+    /// @dev RESTRINGIDO: solo el contractOwner o contratos autorizados (ej. AegisListen)
+    ///      pueden llamar esta función. Esto evita que cualquier persona suba de nivel
+    ///      guardianes NFT de manera ilimitada.
     /// @param tokenId ID del guardián
     /// @param victory true si el guardián protegió exitosamente
     /// @param memoryText Descripción de lo ocurrido (se guarda como cicatriz)
@@ -176,6 +186,9 @@ contract AegisCreate is ERC721, AegisBrain {
         bool victory,
         string memory memoryText
     ) external returns (uint256 newLevel) {
+        if (msg.sender != contractOwner && !authorizedCallers[msg.sender]) {
+            revert UnauthorizedCaller();
+        }
         Soul storage soul = souls[tokenId];
         if (soul.createdAt == 0) revert TokenNotFound();
 
@@ -375,6 +388,15 @@ contract AegisCreate is ERC721, AegisBrain {
     function setMintPrice(uint256 newPrice) external {
         if (msg.sender != contractOwner) revert NotContractOwner();
         mintPrice = newPrice;
+    }
+
+    /// @notice Autoriza o desautoriza un contrato para llamar recordBattle
+    /// @dev Solo el contractOwner puede gestionar esta lista.
+    ///      Usar para autorizar AegisListen u otros contratos de integración.
+    function setAuthorizedCaller(address caller, bool authorized) external {
+        if (msg.sender != contractOwner) revert NotContractOwner();
+        authorizedCallers[caller] = authorized;
+        emit AuthorizedCallerUpdated(caller, authorized);
     }
 
     /// @notice Retira ETH acumulado del contrato

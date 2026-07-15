@@ -18,6 +18,7 @@ evm_version = "cancun"
 
 [rpc_endpoints]
 somnia_testnet = "https://api.infra.testnet.somnia.network/"
+xlayer = "https://rpc.xlayer.tech"
 
 [etherscan]
 somnia_testnet = { key = "${ETHERSCAN_API_KEY}", url = "https://shannon-explorer.somnia.network/api" }

@@ -301,6 +301,7 @@ contract AgentShieldRegistryTest is Test {
 /// Does NOT call back, so scans pass through to LLM but stay unfinalized.
 /// Uses the exact IAgentRequester signature so the ABI matches the real platform.
 contract DummyPlatform {
+    function getRequestDeposit() external pure returns (uint256) { return 0; }
     function createRequest(
         uint256 /* agentId */,
         address /* callbackAddress */,

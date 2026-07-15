@@ -45,6 +45,7 @@ contract AegisBrain is ReentrancyGuard {
         uint256 multiAgentCount;    // Número de agentes en multiThink
         uint256 multiThreshold;     // Umbral de consenso para multiThink
         string[] multiDecisions;    // Decisiones acumuladas en multiThink
+        uint256[] multiRequestIds;  // Todos los requestIds de multiThink (para limpieza completa)
     }
 
     /// @notice Herramienta on-chain para inferToolsChat
@@ -203,7 +204,7 @@ contract AegisBrain is ReentrancyGuard {
         // Disparar todos los agentes en paralelo
         // Cada uno usa el mismo prompt pero es un request independiente
         for (uint256 i = 0; i < agentCount; i++) {
-            _executeMultiThinkAgent(pipelineId, i, prompt);
+            _executeMultiThinkAgent(pipelineId, prompt);
         }
     }
 
@@ -260,7 +261,7 @@ contract AegisBrain is ReentrancyGuard {
         uint256 requestId = SOMNIA_AGENTS.createRequest{value: deposit}(
             LLM_AGENT_ID,
             address(this),
-            this.handleAgentResponse.selector,
+            this.handleResponse.selector,
             payload
         );
         state.requestId = requestId;
@@ -297,24 +298,29 @@ contract AegisBrain is ReentrancyGuard {
     ///      Es el motor que impulsa cada paso del pipeline.
     ///      Los contratos que heredan NO deben sobreescribir esta función.
     ///      En su lugar, sobreescribir _onPipelineComplete().
-    function handleAgentResponse(
+    /// @notice Callback invocado por Somnia Agents cuando un request se completa.
+    /// @dev Esta es la firma EXACTA que los validadores llaman. Si no coincide, el callback nunca llega.
+    ///      Usa Response[] (struct), no bytes[] — esa era la causa del bug anterior.
+    function handleResponse(
         uint256 requestId,
-        bytes[] calldata responses,
-        uint8 status,
-        bytes calldata /* details */
+        ISomniaAgents.Response[] calldata responses,
+        ISomniaAgents.ResponseStatus status,
+        ISomniaAgents.Request calldata /* details */
     ) external {
         // Verificación de seguridad: solo la plataforma de Somnia puede llamar
         if (msg.sender != address(SOMNIA_AGENTS)) revert UnauthorizedCallback();
 
         // Buscar el pipeline asociado a este requestId
-        // Recorremos los pipelines activos (en MVP, el requestId se guarda en el estado)
         uint256 pipelineId = _findPipelineByRequestId(requestId);
         if (pipelineId == 0) return; // No es nuestro request, ignorar silenciosamente
 
         PipelineState storage state = pipelines[pipelineId];
 
-        // Status 2 = Success (ResponseStatus.Success)
-        if (status != 2 || responses.length == 0) {
+        // Guard: si el pipeline ya fue eliminado (stale callback de multiThink), ignorar
+        if (state.owner == address(0)) return;
+
+        // Status Success = 2
+        if (status != ISomniaAgents.ResponseStatus.Success || responses.length == 0) {
             // El agente falló — registrar y abortar pipeline
             emit PipelineFailed(pipelineId, state.currentStep, "Agent response failed or timed out");
             delete requestToPipeline[requestId];
@@ -322,8 +328,8 @@ contract AegisBrain is ReentrancyGuard {
             return;
         }
 
-        // Decodificar la respuesta del agente
-        bytes memory result = responses[0];
+        // Decodificar la respuesta del agente desde el struct Response
+        bytes memory result = responses[0].result;
 
         if (state.isMultiThink) {
             _handleMultiThinkResponse(pipelineId, result);
@@ -370,7 +376,7 @@ contract AegisBrain is ReentrancyGuard {
         uint256 requestId = SOMNIA_AGENTS.createRequest{value: deposit}(
             call.agentId,
             address(this),
-            this.handleAgentResponse.selector,
+            this.handleResponse.selector,
             payload
         );
 
@@ -410,7 +416,7 @@ contract AegisBrain is ReentrancyGuard {
     }
 
     /// @notice Dispara un agente individual para multiThink
-    function _executeMultiThinkAgent(uint256 pipelineId, uint256 agentIndex, string memory prompt) internal {
+    function _executeMultiThinkAgent(uint256 pipelineId, string memory prompt) internal {
         string[] memory allowed = new string[](3);
         allowed[0] = "ALLOW";
         allowed[1] = "WARN";
@@ -429,12 +435,13 @@ contract AegisBrain is ReentrancyGuard {
         uint256 requestId = SOMNIA_AGENTS.createRequest{value: deposit}(
             LLM_AGENT_ID,
             address(this),
-            this.handleAgentResponse.selector,
+            this.handleResponse.selector,
             payload
         );
 
         // Guardar el requestId en el estado y en el mapping inverso
         pipelines[pipelineId].requestId = requestId;
+        pipelines[pipelineId].multiRequestIds.push(requestId);
         requestToPipeline[requestId] = pipelineId;
     }
 
@@ -472,7 +479,10 @@ contract AegisBrain is ReentrancyGuard {
             pipelineResults[pipelineId] = thought;
             emit PipelineCompleted(pipelineId, thought);
             _onPipelineComplete(pipelineId, thought);
-            delete requestToPipeline[state.requestId];
+            // Limpiar todos los requestIds del multiThink (no solo el último)
+            for (uint256 i = 0; i < state.multiRequestIds.length; i++) {
+                delete requestToPipeline[state.multiRequestIds[i]];
+            }
             delete pipelines[pipelineId];
         }
         // Si no, esperar más respuestas (el callback llegará para cada agente)

@@ -59,6 +59,15 @@ contract AegisListen is AegisBrain {
     /// @notice Último trigger ID por listener (O(1) en lugar de loop)
     mapping(uint256 => uint256) public lastTriggerByListener;
 
+    /// @notice Contratos/addresses autorizados para disparar listeners (vacío = cualquiera puede)
+    mapping(address => bool) public authorizedTriggers;
+
+    /// @notice Contador de triggers autorizados (0 = modo abierto, >0 = solo whitelist)
+    uint256 public authorizedTriggerCount;
+
+    /// @notice Owner del contrato (para admin)
+    address public contractOwner;
+
     // ═══════════════════════════════════════════════════════════
     //                         EVENTOS
     // ═══════════════════════════════════════════════════════════
@@ -80,6 +89,11 @@ contract AegisListen is AegisBrain {
         uint256 indexed listenerId
     );
 
+    event AuthorizedTriggerUpdated(
+        address indexed caller,
+        bool authorized
+    );
+
     // ═══════════════════════════════════════════════════════════
     //                         ERRORES
     // ═══════════════════════════════════════════════════════════
@@ -89,6 +103,8 @@ contract AegisListen is AegisBrain {
     error NotListenerOwner();
     error RecursiveTrigger();
     error EmptyPipeline();
+    error UnauthorizedTrigger();
+    error NotContractOwner();
 
     // ═══════════════════════════════════════════════════════════
     //                       CONSTRUCTOR
@@ -97,7 +113,9 @@ contract AegisListen is AegisBrain {
     constructor(
         address somniaAgentsPlatform,
         uint256 agentId
-    ) AegisBrain(somniaAgentsPlatform, agentId) {}
+    ) AegisBrain(somniaAgentsPlatform, agentId) {
+        contractOwner = msg.sender;
+    }
 
     // ═══════════════════════════════════════════════════════════
     //                   REGISTRO DE LISTENERS
@@ -153,6 +171,8 @@ contract AegisListen is AegisBrain {
     ///      - Un contrato que hereda de SomniaEventHandler (vía _onEvent)
     ///      - El SDK off-chain (vía WebSocket reactivity)
     ///      - Cualquier EOA o contrato (para integraciones custom)
+    ///      Si authorizedTriggers tiene entradas, solo esos callers pueden disparar eventos.
+    ///      Si está vacío, cualquiera puede (comportamiento original).
     /// @param listenerId ID del listener a disparar
     /// @param eventData Datos del evento (topics + data ABI-encoded)
     /// @return pipelineId ID del pipeline de IA iniciado
@@ -160,6 +180,8 @@ contract AegisListen is AegisBrain {
         uint256 listenerId,
         bytes calldata eventData
     ) external returns (uint256 pipelineId) {
+        // Access control: si hay triggers autorizados, solo ellos pueden disparar
+        if (!_canTrigger(msg.sender)) revert UnauthorizedTrigger();
         Listener storage listener = listeners[listenerId];
         if (listener.createdAt == 0) revert ListenerNotFound();
         if (!listener.active) revert ListenerInactive();
@@ -196,6 +218,32 @@ contract AegisListen is AegisBrain {
     }
 
     // ═══════════════════════════════════════════════════════════
+    //                   ADMIN
+    // ═══════════════════════════════════════════════════════════
+
+    /// @notice Autoriza o desautoriza un address para disparar listeners
+    /// @dev Solo el contractOwner. Si la whitelist está vacía, cualquiera puede disparar.
+    function setAuthorizedTrigger(address caller, bool authorized) external {
+        if (msg.sender != contractOwner) revert NotContractOwner();
+        if (authorized && !authorizedTriggers[caller]) {
+            authorizedTriggerCount++;
+        } else if (!authorized && authorizedTriggers[caller]) {
+            authorizedTriggerCount--;
+        }
+        authorizedTriggers[caller] = authorized;
+        emit AuthorizedTriggerUpdated(caller, authorized);
+    }
+
+    /// @notice Verifica si un caller puede disparar listeners
+    /// @dev Si no hay authorizedTriggers configurados, cualquiera puede (backward compatible)
+    function _canTrigger(address caller) internal view returns (bool) {
+        if (caller == contractOwner) return true;
+        if (authorizedTriggers[caller]) return true;
+        // Si no hay whitelist configurada, permitir a cualquiera (comportamiento original)
+        return authorizedTriggerCount == 0;
+    }
+
+    // ═══════════════════════════════════════════════════════════
     //                   CONSULTAS
     // ═══════════════════════════════════════════════════════════
 
@@ -213,12 +261,13 @@ contract AegisListen is AegisBrain {
         return triggerResults[triggerId];
     }
 
-    /// @notice Lista todos los listeners activos de un owner
+    /// @notice Lista todos los listeners activos de un owner (máx 50 para evitar gas exhaustion)
     function getListenersByOwner(address owner) external view returns (uint256[] memory) {
-        // Contar primero
+        // Contar primero (con límite)
         uint256 count;
         uint256 maxId = nextListenerId;
-        for (uint256 i = 1; i < maxId; i++) {
+        uint256 maxResults = 50; // Límite para prevenir gas exhaustion
+        for (uint256 i = 1; i < maxId && count < maxResults; i++) {
             if (listeners[i].owner == owner && listeners[i].active) {
                 count++;
             }
@@ -226,12 +275,50 @@ contract AegisListen is AegisBrain {
 
         uint256[] memory result = new uint256[](count);
         uint256 index;
-        for (uint256 i = 1; i < maxId; i++) {
+        for (uint256 i = 1; i < maxId && index < count; i++) {
             if (listeners[i].owner == owner && listeners[i].active) {
                 result[index++] = i;
             }
         }
         return result;
+    }
+
+    /// @notice Versión paginada de getListenersByOwner (sin límite)
+    /// @param offset ID desde donde empezar a buscar
+    /// @param limit Máximo de resultados a devolver
+    function getListenersByOwnerPaginated(
+        address owner,
+        uint256 offset,
+        uint256 limit
+    ) external view returns (uint256[] memory result, uint256 total, bool hasMore) {
+        uint256 maxId = nextListenerId;
+        if (limit > 50) limit = 50; // Cap por llamada
+
+        // Contar total
+        for (uint256 i = 1; i < maxId; i++) {
+            if (listeners[i].owner == owner && listeners[i].active) {
+                total++;
+            }
+        }
+
+        // Recolectar página
+        uint256 collected;
+        uint256 start = offset == 0 ? 1 : offset;
+        for (uint256 i = start; i < maxId && collected < limit; i++) {
+            if (listeners[i].owner == owner && listeners[i].active) {
+                collected++;
+            }
+        }
+
+        result = new uint256[](collected);
+        uint256 index;
+        for (uint256 i = start; i < maxId && index < collected; i++) {
+            if (listeners[i].owner == owner && listeners[i].active) {
+                result[index++] = i;
+            }
+        }
+
+        hasMore = (offset + collected) < total;
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -251,10 +338,10 @@ contract AegisListen is AegisBrain {
         ));
     }
 
-    /// @notice Convierte bytes a hex string (limitado a 64 bytes para no gastar mucho gas)
+    /// @notice Convierte bytes a hex string (limitado a 256 bytes para no gastar mucho gas)
     function _bytesToHex(bytes memory data) internal pure returns (string memory) {
         bytes memory alphabet = "0123456789abcdef";
-        uint256 len = data.length > 64 ? 64 : data.length; // Truncar a 64 bytes máximo
+        uint256 len = data.length > 256 ? 256 : data.length; // Truncar a 256 bytes máximo
         bytes memory str = new bytes(len * 2);
         for (uint256 i = 0; i < len; i++) {
             str[i * 2] = alphabet[uint256(uint8(data[i])) >> 4];

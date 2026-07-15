@@ -11,6 +11,7 @@
     "deploy:somnia": "forge script script/Deploy.s.sol:DeployScript --rpc-url somnia_testnet --broadcast --verify -vvvv",
     "create-demo-policy": "forge script script/Deploy.s.sol:CreateDemoPolicyScript --rpc-url somnia_testnet --broadcast -vvvv",
     "preflight": "cast block-number --rpc-url somnia_testnet && echo 'RPC OK' || echo 'RPC FAIL'",
+    "preflight:xlayer": "cast block-number --rpc-url xlayer && echo 'X Layer RPC OK' || echo 'X Layer RPC FAIL'",
     "dev": "pnpm --dir frontend dev",
     "typecheck": "tsc -p tsconfig.json --noEmit && pnpm --dir frontend typecheck",
     "clean": "forge clean && rm -rf artifacts cache"

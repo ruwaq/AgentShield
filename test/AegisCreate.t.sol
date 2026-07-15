@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {AegisCreate} from "../contracts/aegis/AegisCreate.sol";
+import {ISomniaAgents} from "../contracts/interfaces/ISomniaAgents.sol";
 
 /// @notice Mock de la plataforma Somnia (mismo que en AegisBrain.t.sol)
 contract MockSomniaPlatform {
@@ -34,11 +35,19 @@ contract MockSomniaPlatform {
 
     function simulateCallback(uint256 requestId, string memory response) external {
         PendingRequest memory req = requests[requestId];
-        bytes[] memory responses = new bytes[](1);
-        responses[0] = abi.encode(response);
+        ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
+        responses[0] = ISomniaAgents.Response({
+            validator: address(0),
+            result: abi.encode(response),
+            status: ISomniaAgents.ResponseStatus.Success,
+            receipt: 0,
+            timestamp: 0,
+            executionCost: 0
+        });
 
+        ISomniaAgents.Request memory emptyReq;
         (bool success,) = req.callbackAddress.call(
-            abi.encodeWithSelector(req.callbackSelector, requestId, responses, uint8(2), bytes(""))
+            abi.encodeWithSelector(req.callbackSelector, requestId, responses, ISomniaAgents.ResponseStatus.Success, emptyReq)
         );
         require(success, "callback failed");
     }

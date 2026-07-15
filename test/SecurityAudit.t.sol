@@ -501,6 +501,7 @@ contract SecurityAuditTest is Test {
 // ═══════════════════════════════════════════════════════════
 
 contract DummyPlatform {
+    function getRequestDeposit() external pure returns (uint256) { return 0; }
     function createRequest(
         uint256 /* agentId */,
         address /* callbackAddress */,

@@ -35,7 +35,7 @@ contract AgentShieldRegistry is Ownable2Step, Pausable, ReentrancyGuard, IAgentR
     event RiskRequested(uint256 indexed scanId, uint256 indexed requestId);
     event ScanFinalized(uint256 indexed scanId, Decision decision, uint256 riskScore, RiskLevel riskLevel, bytes32 reasonHash);
 
-    error NotPolicyOwner(); error InvalidPolicy(); error PolicyInactive(); error UnauthorizedCallback(); error AlreadyFinalized(); error InvalidRiskScore();
+    error NotPolicyOwner(); error InvalidPolicy(); error PolicyInactive(); error UnauthorizedCallback(); error AlreadyFinalized(); error InvalidRiskScore(); error InsufficientDeposit();
 
     constructor(address initialOwner, address somniaAgentsPlatform, uint256 agentId) Ownable(initialOwner) {
         SOMNIA_AGENTS = ISomniaAgents(somniaAgentsPlatform);
@@ -77,6 +77,11 @@ contract AgentShieldRegistry is Ownable2Step, Pausable, ReentrancyGuard, IAgentR
         string memory prompt = _buildPrompt(policyId, policy, action, localDecision, localRisk, localReason);
         string[] memory allowed = new string[](3); allowed[0] = "ALLOW"; allowed[1] = "WARN"; allowed[2] = "BLOCK";
         bytes memory payload = abi.encodeWithSignature("inferString(string,string,bool,string[])", prompt, _systemPrompt(), false, allowed);
+
+        // Validar que el msg.value cubre el depósito mínimo de la plataforma
+        uint256 deposit = SOMNIA_AGENTS.getRequestDeposit();
+        if (msg.value < deposit) revert InsufficientDeposit();
+
         requestId = SOMNIA_AGENTS.createRequest{value: msg.value}(LLM_AGENT_ID, address(this), this.handleResponse.selector, payload);
         scans[scanId].requestId = requestId;
         requestToScan[requestId] = scanId;

@@ -364,6 +364,7 @@ contract EdgeCasesTest is Test {
 }
 
 contract DummyPlatform {
+    function getRequestDeposit() external pure returns (uint256) { return 0; }
     function createRequest(uint256, address, bytes4, bytes calldata) external payable returns (uint256) {
         return 1;
     }

@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {AegisBrain} from "../contracts/aegis/AegisBrain.sol";
+import {ISomniaAgents} from "../contracts/interfaces/ISomniaAgents.sol";
 
 /// @notice Mock de la plataforma Somnia para tests
 /// @dev Simula createRequest y permite disparar callbacks manualmente.
@@ -37,11 +38,19 @@ contract MockSomniaPlatform {
     /// @notice Simula un callback exitoso desde la plataforma
     function simulateCallback(uint256 requestId, string memory response) external {
         PendingRequest memory req = requests[requestId];
-        bytes[] memory responses = new bytes[](1);
-        responses[0] = abi.encode(response);
+        ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
+        responses[0] = ISomniaAgents.Response({
+            validator: address(0),
+            result: abi.encode(response),
+            status: ISomniaAgents.ResponseStatus.Success,
+            receipt: 0,
+            timestamp: 0,
+            executionCost: 0
+        });
 
+        ISomniaAgents.Request memory emptyReq;
         (bool success,) = req.callbackAddress.call(
-            abi.encodeWithSelector(req.callbackSelector, requestId, responses, uint8(2), bytes(""))
+            abi.encodeWithSelector(req.callbackSelector, requestId, responses, ISomniaAgents.ResponseStatus.Success, emptyReq)
         );
         require(success, "callback failed");
     }
@@ -49,10 +58,11 @@ contract MockSomniaPlatform {
     /// @notice Simula un callback fallido
     function simulateFailedCallback(uint256 requestId) external {
         PendingRequest memory req = requests[requestId];
-        bytes[] memory responses = new bytes[](0);
+        ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](0);
 
+        ISomniaAgents.Request memory emptyReq;
         (bool success,) = req.callbackAddress.call(
-            abi.encodeWithSelector(req.callbackSelector, requestId, responses, uint8(3), bytes("failed"))
+            abi.encodeWithSelector(req.callbackSelector, requestId, responses, ISomniaAgents.ResponseStatus.Failed, emptyReq)
         );
         require(success, "callback failed");
     }
@@ -393,19 +403,28 @@ contract AegisBrainTest is Test {
     //                    SEGURIDAD
     // ═══════════════════════════════════════════════════════════
 
-    function test_handleAgentResponse_revertsOnUnauthorized() public {
+    function test_handleResponse_revertsOnUnauthorized() public {
         vm.prank(attacker);
-        bytes[] memory responses = new bytes[](0);
+        ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](0);
+        ISomniaAgents.Request memory emptyReq;
         vm.expectRevert(AegisBrain.UnauthorizedCallback.selector);
-        brain.handleAgentResponse(1, responses, 2, bytes(""));
+        brain.handleResponse(1, responses, ISomniaAgents.ResponseStatus.Success, emptyReq);
     }
 
-    function test_handleAgentResponse_ignoresUnknownRequest() public {
+    function test_handleResponse_ignoresUnknownRequest() public {
         // Un requestId que no existe no debería revertir
         vm.prank(address(platform));
-        bytes[] memory responses = new bytes[](1);
-        responses[0] = abi.encode("test");
-        brain.handleAgentResponse(99999, responses, 2, bytes(""));
+        ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
+        responses[0] = ISomniaAgents.Response({
+            validator: address(0),
+            result: abi.encode("test"),
+            status: ISomniaAgents.ResponseStatus.Success,
+            receipt: 0,
+            timestamp: 0,
+            executionCost: 0
+        });
+        ISomniaAgents.Request memory emptyReq;
+        brain.handleResponse(99999, responses, ISomniaAgents.ResponseStatus.Success, emptyReq);
         // No debería revertir — simplemente ignora
     }
 
