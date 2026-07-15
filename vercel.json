@@ -3,14 +3,7 @@
   "outputDirectory": "frontend/dist",
   "installCommand": "pnpm install",
   "framework": "vite",
-  "functions": {
-    "api/analyze.ts": {
-      "memory": 256,
-      "maxDuration": 10
-    }
-  },
   "rewrites": [
-    { "source": "/api/analyze", "destination": "/api/analyze" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
