@@ -295,24 +295,32 @@ function StepIndicator({ activeStep, verdict }: { activeStep: DemoStep; verdict?
 function CustomTxForm({
   onSubmit,
   busy,
+  defaultRecipient,
 }: {
   onSubmit: (intent: string, amount: string, recipient: string) => void;
   busy: boolean;
+  defaultRecipient: string;
 }) {
   const [intent, setIntent] = useState("");
-  const [amount, setAmount] = useState("");
-  const [recipient, setRecipient] = useState("");
+  const [amount, setAmount] = useState("0.01");
+  const [recipient, setRecipient] = useState(defaultRecipient);
   const [expanded, setExpanded] = useState(false);
+
+  const SUGGESTIONS = [
+    { label: "Safe payment", text: "Send 0.01 STT to vendor for monthly infrastructure payment" },
+    { label: "DeFi swap", text: "Swap 100 USDC for STT on a newly launched DEX" },
+    { label: "Airdrop scam", text: "Approve unlimited USDC to claim a free airdrop" },
+    { label: "Exceed limit", text: "Send 500 STT to drain wallet" },
+  ];
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!intent.trim()) return;
-    onSubmit(intent.trim(), amount, recipient.trim());
-    if (!expanded) {
-      setIntent("");
-      setAmount("");
-      setRecipient("");
-    }
+    onSubmit(intent.trim(), amount, recipient.trim() || defaultRecipient);
+  };
+
+  const handleSuggestion = (text: string) => {
+    setIntent(text);
   };
 
   const isValid = intent.trim().length > 0 && !busy;
@@ -322,6 +330,7 @@ function CustomTxForm({
       <div className="custom-tx-form-header">
         <span className="custom-tx-form-icon">✍️</span>
         <span className="custom-tx-form-title">PROPOSE A TRANSACTION</span>
+        <span className="custom-tx-form-hint">to {short(defaultRecipient)}</span>
       </div>
       <form onSubmit={handleSubmit}>
         <div className="custom-tx-form-row">
@@ -329,11 +338,25 @@ function CustomTxForm({
           <input
             className="custom-tx-input"
             type="text"
-            placeholder="e.g. Send 5 STT to vendor for hosting payment..."
+            placeholder="Describe the transaction in plain English..."
             value={intent}
             onChange={(e) => setIntent(e.target.value)}
             disabled={busy}
           />
+        </div>
+        {/* Suggestion chips */}
+        <div className="suggestion-chips">
+          {SUGGESTIONS.map((s) => (
+            <button
+              key={s.label}
+              type="button"
+              className="suggestion-chip"
+              onClick={() => handleSuggestion(s.text)}
+              disabled={busy}
+            >
+              {s.label}
+            </button>
+          ))}
         </div>
         <button
           type="button"
@@ -341,7 +364,7 @@ function CustomTxForm({
           onClick={() => setExpanded(!expanded)}
           style={{ marginBottom: expanded ? 12 : 0 }}
         >
-          {expanded ? "▲ Hide details" : "▼ Set amount & recipient (optional)"}
+          {expanded ? "▲ Hide details" : "▼ Amount & recipient"} · {amount} STT → {short(recipient || defaultRecipient)}
         </button>
         {expanded && (
           <div className="custom-tx-form-details">
@@ -352,7 +375,7 @@ function CustomTxForm({
                 type="number"
                 step="0.001"
                 min="0"
-                placeholder="5"
+                placeholder="0.01"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 disabled={busy}
@@ -363,11 +386,12 @@ function CustomTxForm({
               <input
                 className="custom-tx-input mono"
                 type="text"
-                placeholder="0x..."
+                placeholder={defaultRecipient}
                 value={recipient}
                 onChange={(e) => setRecipient(e.target.value)}
                 disabled={busy}
               />
+              <span className="custom-tx-form-help">Demo wallet: {defaultRecipient}</span>
             </div>
           </div>
         )}
@@ -903,7 +927,7 @@ function App() {
         <StepIndicator activeStep={demoStep} verdict={activeResult?.verdict} />
 
         {/* Custom Transaction Form */}
-        <CustomTxForm onSubmit={handleCustomTx} busy={busy} />
+        <CustomTxForm onSubmit={handleCustomTx} busy={busy} defaultRecipient={recipAddr} />
 
         {/* Quick Tests */}
         <section>

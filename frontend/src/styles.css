@@ -1981,6 +1981,7 @@ input { font: inherit; }
   align-items: center;
   gap: 8px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 
 .custom-tx-form-icon {
@@ -1992,6 +1993,17 @@ input { font: inherit; }
   font-weight: 700;
   letter-spacing: .08em;
   color: var(--dim);
+}
+
+.custom-tx-form-hint {
+  font-size: 11px;
+  color: var(--dim);
+  font-family: monospace;
+  margin-left: auto;
+  padding: 3px 8px;
+  background: var(--surface);
+  border-radius: 6px;
+  border: 1px solid var(--border);
 }
 
 .custom-tx-form-row {
@@ -2048,6 +2060,48 @@ input { font: inherit; }
 .custom-tx-submit {
   width: 100%;
   margin-top: 16px;
+}
+
+/* Suggestion chips */
+.suggestion-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.suggestion-chip {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+}
+
+.suggestion-chip:hover:not(:disabled) {
+  border-color: var(--purple);
+  color: var(--text);
+  background: rgba(139,92,246,.08);
+}
+
+.suggestion-chip:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+
+.custom-tx-form-help {
+  display: block;
+  font-size: 10px;
+  color: var(--dim);
+  margin-top: 4px;
+  font-family: monospace;
+  word-break: break-all;
 }
 
 /* ═══════════════════════════════════════════════════
