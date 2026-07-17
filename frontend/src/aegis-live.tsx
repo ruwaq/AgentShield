@@ -307,10 +307,10 @@ function CustomTxForm({
   const [expanded, setExpanded] = useState(false);
 
   const SUGGESTIONS = [
-    { label: "Safe payment", text: "Send 0.01 STT to vendor for monthly infrastructure payment" },
-    { label: "DeFi swap", text: "Swap 100 USDC for STT on a newly launched DEX" },
-    { label: "Airdrop scam", text: "Approve unlimited USDC to claim a free airdrop" },
-    { label: "Exceed limit", text: "Send 500 STT to drain wallet" },
+    { label: "💳 Pay vendor", text: "Send monthly infrastructure payment to hosting provider" },
+    { label: "🔄 DeFi swap", text: "Swap 100 USDC for STT on a new DEX to get better yields" },
+    { label: "🎁 Claim airdrop", text: "Claim free token airdrop from this new protocol — connect wallet to receive rewards" },
+    { label: "💸 Move funds", text: "Transfer 500 STT to upgrade wallet security to a new address" },
   ];
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -852,8 +852,8 @@ function App() {
     const scenario: Scenario = {
       label: "Custom transaction",
       icon: "✍️",
-      intent: amount ? `Send ${amount} STT to ${recipient} — ${intent}` : intent,
-      description: "Your custom transaction",
+      intent: intent, // Use the exact intent — the AI agent's own words
+      description: `${amount || "0.001"} STT → ${recipient ? short(recipient) : "demo wallet"}`,
       transferAmount: amount || "0.001",
       shouldTransfer: true,
     };
