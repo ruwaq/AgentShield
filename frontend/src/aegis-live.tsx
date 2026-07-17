@@ -271,7 +271,7 @@ function StepIndicator({ activeStep, verdict }: { activeStep: DemoStep; verdict?
           return (
             <React.Fragment key={s.key}>
               <div className={`step-node ${stateClass}`}>
-                <div className="step-node-icon">{isDone ? "✓" : s.icon}</div>
+                <div className="step-node-icon">{isDone && i < steps.length - 1 ? "✓" : s.icon}</div>
                 <div className="step-node-label">{s.label}</div>
                 <div className="step-node-sub">{s.sub}</div>
               </div>
@@ -765,7 +765,7 @@ function App() {
         verdict: decision.verdict,
         riskScore: Number(decision.riskScore),
         reasoning: decision.reasoning,
-        timestamp: Number(decision.timestamp),
+        timestamp: Number(decision.timestamp) * 1000, // Convert seconds to ms
         deterministic: llmResponse.deterministic,
         txHash: hash2,
       };
@@ -875,6 +875,11 @@ function App() {
   // Cleanup
   useEffect(() => { return () => { abortRef.current?.abort(); }; }, []);
 
+  // Reset step indicator when idle
+  useEffect(() => {
+    if (txStage === "idle") setDemoStep("agent");
+  }, [txStage]);
+
   // ═══════════════════════════════════════════════════
   // RENDER
   // ═══════════════════════════════════════════════════
@@ -923,8 +928,10 @@ function App() {
           </div>
         </div>
 
-        {/* Step Indicator */}
-        <StepIndicator activeStep={demoStep} verdict={activeResult?.verdict} />
+        {/* Step Indicator — only visible during active analysis */}
+        {txStage !== "idle" && (
+          <StepIndicator activeStep={demoStep} verdict={activeResult?.verdict} />
+        )}
 
         {/* Custom Transaction Form */}
         <CustomTxForm onSubmit={handleCustomTx} busy={busy} defaultRecipient={recipAddr} />
