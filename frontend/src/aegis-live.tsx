@@ -30,8 +30,8 @@ const somniaChain = {
   rpcUrls: { default: { http: [RPC_URL] } },
 } as const satisfies Chain;
 
-const AGENT_KEY = (import.meta.env.VITE_AGENT_WALLET_KEY as `0x${string}`) || "";
-const RECIPIENT_ADDR: Address = (import.meta.env.VITE_RECIPIENT_WALLET as Address) || "0x546A64d5ae8A2A79A3c29d254F5a34A95aC0CE96";
+const AGENT_KEY = ((import.meta.env.VITE_AGENT_WALLET_KEY as string)?.trim() || "") as `0x${string}`;
+const RECIPIENT_ADDR: Address = ((import.meta.env.VITE_RECIPIENT_WALLET as string)?.trim() || "0x546A64d5ae8A2A79A3c29d254F5a34A95aC0CE96") as Address;
 
 const DEMO_POLICY = "Block all scams and phishing. Max 50 STT per transaction. Only allow verified DeFi protocols.";
 
