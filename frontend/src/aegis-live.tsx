@@ -8,7 +8,6 @@ import {
   parseEther,
   formatEther,
   type Address,
-  type Hash,
   type Chain,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -49,16 +48,19 @@ interface SecurityEvent {
   deterministic: boolean;
   txHash?: string;
   transferTxHash?: string;
+  humanApproved?: boolean;
 }
 
-type TxStage = "idle" | "submitting" | "confirming" | "analyzing" | "recording" | "executing" | "done";
+type TxStage = "idle" | "submitting" | "confirming" | "analyzing" | "recording" | "waiting_human" | "executing" | "done";
+
+type DemoStep = "agent" | "check" | "ai" | "verdict";
 
 interface Scenario {
   label: string;
   icon: string;
   intent: string;
   description: string;
-  transferAmount: string; // e.g. "0.01" ether
+  transferAmount: string;
   shouldTransfer: boolean;
 }
 
@@ -95,7 +97,7 @@ const SCENARIOS: Scenario[] = [
     label: "Safe payment to vendor",
     icon: "✅",
     intent: "Send 0.01 STT to vendor for monthly infrastructure payment",
-    description: "The AI agent wants to pay a known vendor. Amount is within policy limits. Expected: ALLOW, transfer executes.",
+    description: "Routine payment. Amount within limits. Known address.",
     transferAmount: "0.01",
     shouldTransfer: true,
   },
@@ -103,7 +105,7 @@ const SCENARIOS: Scenario[] = [
     label: "Unverified DeFi swap",
     icon: "⚠️",
     intent: "Swap 100 USDC for STT on a newly launched DEX at 0x7d2c4e8a1f3b5c7d9e2f4a6b8c0d2e4f6a8b0c",
-    description: "The AI agent found a new DEX. The contract is unverified — AgentShield warns but allows. Expected: WARN, transfer allowed.",
+    description: "New DEX. Unverified contract. Needs human review.",
     transferAmount: "0.005",
     shouldTransfer: true,
   },
@@ -111,7 +113,7 @@ const SCENARIOS: Scenario[] = [
     label: "Phishing airdrop scam",
     icon: "🔴",
     intent: "Approve unlimited USDC spending to claim a free airdrop from 0x9a8f7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f",
-    description: "The AI agent was tricked by a phishing site. Unlimited approval = classic wallet drain. Expected: BLOCK, transfer rejected.",
+    description: "Classic wallet drain. Unlimited approval = instant block.",
     transferAmount: "0.01",
     shouldTransfer: false,
   },
@@ -143,6 +145,19 @@ class ErrorBoundary extends React.Component<
     }
     return this.props.children;
   }
+}
+
+// ═══════════════════════════════════════════════════
+// UI: Agent Active Badge
+// ═══════════════════════════════════════════════════
+
+function AgentActiveBadge({ agentAddr }: { agentAddr: string }) {
+  return (
+    <div className="agent-active-badge">
+      <span className="agent-active-dot" />
+      <span className="agent-active-text">AgentShield Active — Monitoring {short(agentAddr)}</span>
+    </div>
+  );
 }
 
 // ═══════════════════════════════════════════════════
@@ -224,19 +239,142 @@ function WalletCards({
 }
 
 // ═══════════════════════════════════════════════════
-// UI: Info Panel
+// UI: 4-Step Progress Indicator
 // ═══════════════════════════════════════════════════
 
-function InfoPanel({
-  icon, title, children, variant = "info",
-}: { icon: string; title: string; children: React.ReactNode; variant?: "info" | "success" | "warning" | "tip" }) {
+function StepIndicator({ activeStep, verdict }: { activeStep: DemoStep; verdict?: string }) {
+  const steps: { key: DemoStep; icon: string; label: string; sub: string }[] = [
+    { key: "agent", icon: "🤖", label: "Agent proposes", sub: "AI agent describes the transaction" },
+    { key: "check", icon: "🛡️", label: "AgentShield checks", sub: "Deterministic rules + policy" },
+    { key: "ai", icon: "🧠", label: "AI analyzes", sub: "LLM deep analysis on-chain" },
+    { key: "verdict", icon: "✅", label: "Verdict", sub: "Execute or block" },
+  ];
+
+  const stepOrder: DemoStep[] = ["agent", "check", "ai", "verdict"];
+  const activeIdx = stepOrder.indexOf(activeStep);
+
+  if (verdict === "BLOCK") steps[3].icon = "🚫";
+  else if (verdict === "WARN") steps[3].icon = "⚠️";
+  else if (verdict === "ALLOW") steps[3].icon = "✅";
+
   return (
-    <div className={`info-panel info-${variant}`}>
-      <div className="info-panel-header">
-        <span className="info-panel-icon">{icon}</span>
-        <span className="info-panel-title">{title}</span>
+    <div className="step-indicator">
+      <div className="step-indicator-title">HOW AGENTSHIELD WORKS</div>
+      <div className="step-indicator-row">
+        {steps.map((s, i) => {
+          const isActive = i === activeIdx;
+          const isDone = i < activeIdx;
+          let stateClass = "pending";
+          if (isActive) stateClass = "active";
+          else if (isDone) stateClass = "done";
+
+          return (
+            <React.Fragment key={s.key}>
+              <div className={`step-node ${stateClass}`}>
+                <div className="step-node-icon">{isDone ? "✓" : s.icon}</div>
+                <div className="step-node-label">{s.label}</div>
+                <div className="step-node-sub">{s.sub}</div>
+              </div>
+              {i < steps.length - 1 && (
+                <div className={`step-connector ${isDone ? "done" : ""}`}>
+                  <div className="step-connector-line" />
+                </div>
+              )}
+            </React.Fragment>
+          );
+        })}
       </div>
-      <div className="info-panel-body">{children}</div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════
+// UI: Custom Transaction Form
+// ═══════════════════════════════════════════════════
+
+function CustomTxForm({
+  onSubmit,
+  busy,
+}: {
+  onSubmit: (intent: string, amount: string, recipient: string) => void;
+  busy: boolean;
+}) {
+  const [intent, setIntent] = useState("");
+  const [amount, setAmount] = useState("");
+  const [recipient, setRecipient] = useState("");
+  const [expanded, setExpanded] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!intent.trim()) return;
+    onSubmit(intent.trim(), amount, recipient.trim());
+    if (!expanded) {
+      setIntent("");
+      setAmount("");
+      setRecipient("");
+    }
+  };
+
+  const isValid = intent.trim().length > 0 && !busy;
+
+  return (
+    <div className="custom-tx-form">
+      <div className="custom-tx-form-header">
+        <span className="custom-tx-form-icon">✍️</span>
+        <span className="custom-tx-form-title">PROPOSE A TRANSACTION</span>
+      </div>
+      <form onSubmit={handleSubmit}>
+        <div className="custom-tx-form-row">
+          <label className="custom-tx-label">What does your AI agent want to do?</label>
+          <input
+            className="custom-tx-input"
+            type="text"
+            placeholder="e.g. Send 5 STT to vendor for hosting payment..."
+            value={intent}
+            onChange={(e) => setIntent(e.target.value)}
+            disabled={busy}
+          />
+        </div>
+        <button
+          type="button"
+          className="btn subtle small"
+          onClick={() => setExpanded(!expanded)}
+          style={{ marginBottom: expanded ? 12 : 0 }}
+        >
+          {expanded ? "▲ Hide details" : "▼ Set amount & recipient (optional)"}
+        </button>
+        {expanded && (
+          <div className="custom-tx-form-details">
+            <div className="custom-tx-form-row">
+              <label className="custom-tx-label">Amount (STT)</label>
+              <input
+                className="custom-tx-input small"
+                type="number"
+                step="0.001"
+                min="0"
+                placeholder="5"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                disabled={busy}
+              />
+            </div>
+            <div className="custom-tx-form-row">
+              <label className="custom-tx-label">Recipient address</label>
+              <input
+                className="custom-tx-input mono"
+                type="text"
+                placeholder="0x..."
+                value={recipient}
+                onChange={(e) => setRecipient(e.target.value)}
+                disabled={busy}
+              />
+            </div>
+          </div>
+        )}
+        <button type="submit" className="btn primary large custom-tx-submit" disabled={!isValid}>
+          {busy ? <><span className="spinner" /> Analyzing...</> : "⚡ PROPOSE TRANSACTION"}
+        </button>
+      </form>
     </div>
   );
 }
@@ -250,14 +388,16 @@ function TxProgress({ stage, txHash, fulfillTxHash, transferTxHash }: {
 }) {
   if (stage === "idle") return null;
   const stages: { key: TxStage; label: string; hash?: string }[] = [
-    { key: "submitting", label: "Submitting analysis to AgentShield..." },
-    { key: "confirming", label: "Confirmed on Somnia Testnet", hash: txHash },
-    { key: "analyzing", label: "Running deterministic + LLM checks..." },
-    { key: "recording", label: "Verdict recorded on-chain", hash: fulfillTxHash },
-    { key: "executing", label: "Executing transfer..." },
+    { key: "submitting", label: "🤖 AI Agent proposed transaction — submitting to AgentShield..." },
+    { key: "confirming", label: "⛓️ Confirmed on Somnia Testnet", hash: txHash },
+    { key: "analyzing", label: "🛡️ AgentShield running deterministic checks + policy validation..." },
+    { key: "recording", label: "🧠 LLM deep analysis on-chain — verdict recorded", hash: fulfillTxHash },
+    { key: "waiting_human", label: "👤 Human review required — waiting for your decision..." },
+    { key: "executing", label: "💸 Executing transfer..." },
     { key: "done", label: "✅ Complete" },
   ];
   const currentIdx = stages.findIndex((s) => s.key === stage);
+  if (currentIdx === -1) return null;
   return (
     <div className="tx-progress" role="status" aria-live="polite">
       {stages.slice(0, currentIdx + 1).map((s, i) => (
@@ -273,6 +413,57 @@ function TxProgress({ stage, txHash, fulfillTxHash, transferTxHash }: {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════
+// UI: Human Approval Card (for WARN verdicts)
+// ═══════════════════════════════════════════════════
+
+function HumanApprovalCard({
+  event: e,
+  onApprove,
+  onReject,
+  busy,
+}: {
+  event: SecurityEvent;
+  onApprove: () => void;
+  onReject: () => void;
+  busy: boolean;
+}) {
+  const s = verdictStyle(e.verdict);
+  return (
+    <div className="human-approval-card" style={{ borderColor: s.border }}>
+      <div className="human-approval-header">
+        <span className="human-approval-icon">⚠️</span>
+        <span className="human-approval-title" style={{ color: s.color }}>WARN — Human Review Required</span>
+        <span className="human-approval-score" style={{ color: s.color }}>Risk: {e.riskScore}/100</span>
+      </div>
+      <div className="risk-bar-container">
+        <div className="risk-bar-track">
+          <div className="risk-bar-fill" style={{ width: `${e.riskScore}%`, background: riskColor(e.riskScore), boxShadow: `0 0 12px ${riskColor(e.riskScore)}44` }} />
+        </div>
+        <div className="risk-bar-labels"><span>Safe</span><span>Caution</span><span>Danger</span></div>
+      </div>
+      <div className="human-approval-reasoning">
+        <p>"{e.reasoning}"</p>
+      </div>
+      <div className="human-approval-details">
+        <span className="human-approval-detail-label">Transaction details:</span>
+        <ul>
+          <li>Intent: "{e.intent}"</li>
+          <li>Analysis: {e.deterministic ? "⚡ Instant (deterministic)" : "🧠 LLM deep analysis"}</li>
+        </ul>
+      </div>
+      <div className="human-approval-actions">
+        <button className="btn primary approve-btn" onClick={onApprove} disabled={busy}>
+          ✅ APPROVE — I accept the risk
+        </button>
+        <button className="btn reject-btn" onClick={onReject} disabled={busy}>
+          🚫 REJECT — Block this transaction
+        </button>
+      </div>
     </div>
   );
 }
@@ -295,8 +486,11 @@ function ResultCard({ event: e }: { event: SecurityEvent }) {
         <span className="result-score" style={{ color: s.color }}>Risk: {e.riskScore}/100</span>
         {e.deterministic && <span className="deterministic-badge">⚡ Instant Block</span>}
         {!e.deterministic && <span className="llm-badge">🧠 LLM Analysis</span>}
-        {e.verdict === "BLOCK" && <span className="live-badge">🚫 Transfer blocked</span>}
-        {e.verdict !== "BLOCK" && e.transferTxHash && <span className="live-badge">✅ Transfer executed</span>}
+        {e.humanApproved && <span className="live-badge" style={{ color: "#22c55e" }}>👤 Human Approved</span>}
+        {e.verdict === "BLOCK" && <span className="live-badge">🚫 Blocked by AgentShield</span>}
+        {e.verdict === "ALLOW" && e.transferTxHash && <span className="live-badge">✅ Auto-Approved — Transfer executed</span>}
+        {e.verdict === "WARN" && e.transferTxHash && <span className="live-badge">⚠️ Transfer executed (human approved)</span>}
+        {e.verdict === "WARN" && !e.transferTxHash && e.humanApproved === false && <span className="live-badge" style={{ color: "#ef4444" }}>🚫 Rejected by human</span>}
       </div>
       <div className="risk-bar-container">
         <div className="risk-bar-track">
@@ -353,8 +547,10 @@ function SecurityLog({ events, activeId, onSelect }: {
                 <span className="feed-verdict" style={{ background: s.bg, color: s.color }}>{e.verdict}</span>
                 <span className="feed-score" style={{ color: s.color }}>Risk: {e.riskScore}/100</span>
                 <span className="feed-badge">{e.deterministic ? "⚡ Instant" : "🧠 LLM"}</span>
+                {e.humanApproved && <span className="feed-badge" style={{ color: "#22c55e" }}>👤 Human</span>}
                 {e.transferTxHash && <span className="feed-badge" style={{ color: "#22c55e" }}>✅ Sent</span>}
                 {e.verdict === "BLOCK" && <span className="feed-badge" style={{ color: "#ef4444" }}>🚫 Blocked</span>}
+                {e.verdict === "WARN" && !e.transferTxHash && e.humanApproved === false && <span className="feed-badge" style={{ color: "#ef4444" }}>🚫 Rejected</span>}
                 <span className="feed-time">{timeAgo(e.timestamp)}</span>
               </div>
               <p className="feed-intent">"{e.intent}"</p>
@@ -424,6 +620,14 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [agentBal, setAgentBal] = useState("?");
   const [recipBal, setRecipBal] = useState("?");
+  const [demoStep, setDemoStep] = useState<DemoStep>("agent");
+  const [pendingApproval, setPendingApproval] = useState<{
+    event: SecurityEvent;
+    scenario: Scenario;
+    analysisId: bigint;
+    fulfillHash: string;
+  } | null>(null);
+  const [autoPlaying, setAutoPlaying] = useState(false);
 
   const eventCounter = useRef(0);
   const resultRef = useRef<HTMLDivElement>(null);
@@ -452,8 +656,21 @@ function App() {
 
   useEffect(() => { refreshBalances(); }, [refreshBalances]);
 
-  // ── Run analysis + transfer ──
-  const runReview = useCallback(async (scenario: Scenario) => {
+  // ── Execute transfer ──
+  const executeTransfer = useCallback(async (scenario: Scenario) => {
+    if (!walletClient) return;
+    setTxStage("executing");
+    const txHash3 = await walletClient.sendTransaction({
+      to: recipAddr,
+      value: parseEther(scenario.transferAmount),
+    });
+    setTransferTxHash(txHash3);
+    await publicClient.waitForTransactionReceipt({ hash: txHash3 });
+    return txHash3;
+  }, [walletClient, publicClient, recipAddr]);
+
+  // ── Run analysis (pause if WARN for human approval) ──
+  const runAnalysis = useCallback(async (scenario: Scenario, autoApproveWarn = false) => {
     if (!walletClient) { setError("Wallet not configured"); return; }
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -464,11 +681,18 @@ function App() {
     setTxHash(undefined);
     setFulfillTxHash(undefined);
     setTransferTxHash(undefined);
-    setTxStage("submitting");
+    setPendingApproval(null);
+    setDemoStep("agent");
     setActiveResult(null);
 
     try {
-      // Step 1: Submit analysis to AgentShield
+      // Step 1: Agent proposes
+      setDemoStep("agent");
+      setTxStage("submitting");
+      await new Promise(r => setTimeout(r, 400));
+
+      // Step 2: Check rules
+      setDemoStep("check");
       const hash = await walletClient.writeContract({
         address: AEGIS_ADDRESS, abi: aegisBrainV2Abi,
         functionName: "analyze", args: [scenario.intent],
@@ -479,7 +703,6 @@ function App() {
       setTxStage("confirming");
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
 
-      // Extract analysisId
       let analysisId = 0n;
       for (const log of receipt.logs) {
         try {
@@ -491,10 +714,12 @@ function App() {
       }
       if (analysisId === 0n) throw new Error("AnalysisStarted event not found");
 
+      // Step 3: AI analyzes
+      setDemoStep("ai");
       setTxStage("analyzing");
+      await new Promise(r => setTimeout(r, 800));
       const llmResponse = simulateLLMResponse(scenario.intent);
 
-      // Step 2: Record verdict
       setTxStage("recording");
       const hash2 = await walletClient.writeContract({
         address: AEGIS_ADDRESS, abi: aegisBrainV2Abi,
@@ -510,24 +735,7 @@ function App() {
         functionName: "getDecision", args: [analysisId],
       }) as unknown as { verdict: string; riskScore: bigint; reasoning: string; timestamp: bigint };
 
-      let transferHash: string | undefined;
-
-      // Step 3: Execute transfer if ALLOW or WARN
-      if (scenario.shouldTransfer && (decision.verdict === "ALLOW" || decision.verdict === "WARN")) {
-        setTxStage("executing");
-        const txHash3 = await walletClient.sendTransaction({
-          to: recipAddr,
-          value: parseEther(scenario.transferAmount),
-        });
-        if (controller.signal.aborted) return;
-        transferHash = txHash3;
-        setTransferTxHash(txHash3);
-        await publicClient.waitForTransactionReceipt({ hash: txHash3 });
-      }
-
-      setTxStage("done");
-
-      const event: SecurityEvent = {
+      const eventBase: SecurityEvent = {
         id: `evt-${++eventCounter.current}`,
         intent: scenario.intent,
         verdict: decision.verdict,
@@ -536,8 +744,28 @@ function App() {
         timestamp: Number(decision.timestamp),
         deterministic: llmResponse.deterministic,
         txHash: hash2,
-        transferTxHash: transferHash,
       };
+
+      // Step 4: Verdict
+      setDemoStep("verdict");
+
+      if (decision.verdict === "WARN" && !autoApproveWarn) {
+        // HUMAN-IN-THE-LOOP: pause for approval
+        setTxStage("waiting_human");
+        setPendingApproval({ event: eventBase, scenario, analysisId, fulfillHash: hash2 });
+        setActiveResult(eventBase);
+        setBusy(false);
+        return;
+      }
+
+      // Auto: ALLOW → execute, BLOCK → skip, WARN+autoApprove → execute
+      let transferHash: string | undefined;
+      if (decision.verdict !== "BLOCK" && scenario.shouldTransfer) {
+        transferHash = await executeTransfer(scenario);
+      }
+
+      setTxStage("done");
+      const event: SecurityEvent = { ...eventBase, transferTxHash: transferHash };
 
       setEvents((prev) => [event, ...prev].slice(0, 20));
       setActiveResult(event);
@@ -545,11 +773,80 @@ function App() {
       setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
     } catch (e) {
       setTxStage("idle");
+      setDemoStep("agent");
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, [walletClient, publicClient, recipAddr, refreshBalances]);
+  }, [walletClient, publicClient, executeTransfer, refreshBalances]);
+
+  // ── Human approves WARN ──
+  const handleHumanApprove = useCallback(async () => {
+    if (!pendingApproval) return;
+    setBusy(true);
+    const pa = pendingApproval;
+    setPendingApproval(null);
+    setTxStage("executing");
+    try {
+      const transferHash = await executeTransfer(pa.scenario);
+      setTxStage("done");
+      const event: SecurityEvent = {
+        ...pa.event,
+        transferTxHash: transferHash,
+        humanApproved: true,
+      };
+      setEvents((prev) => [event, ...prev].slice(0, 20));
+      setActiveResult(event);
+      refreshBalances();
+      setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+    } catch (e) {
+      setTxStage("idle");
+      setDemoStep("agent");
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [pendingApproval, executeTransfer, refreshBalances]);
+
+  // ── Human rejects WARN ──
+  const handleHumanReject = useCallback(() => {
+    if (!pendingApproval) return;
+    const event: SecurityEvent = {
+      ...pendingApproval.event,
+      transferTxHash: undefined,
+      humanApproved: false,
+    };
+    setPendingApproval(null);
+    setTxStage("done");
+    setEvents((prev) => [event, ...prev].slice(0, 20));
+    setActiveResult(event);
+    setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+  }, [pendingApproval]);
+
+  // ── Custom transaction ──
+  const handleCustomTx = useCallback((intent: string, amount: string, recipient: string) => {
+    const scenario: Scenario = {
+      label: "Custom transaction",
+      icon: "✍️",
+      intent: amount ? `Send ${amount} STT to ${recipient} — ${intent}` : intent,
+      description: "Your custom transaction",
+      transferAmount: amount || "0.001",
+      shouldTransfer: true,
+    };
+    runAnalysis(scenario);
+  }, [runAnalysis]);
+
+  // ── Auto-play demo ──
+  const handleAutoPlay = useCallback(async () => {
+    setAutoPlaying(true);
+    for (let i = 0; i < SCENARIOS.length; i++) {
+      await runAnalysis(SCENARIOS[i], true);
+      if (i < SCENARIOS.length - 1) {
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    }
+    setAutoPlaying(false);
+  }, [runAnalysis]);
 
   // Cleanup
   useEffect(() => { return () => { abortRef.current?.abort(); }; }, []);
@@ -584,6 +881,9 @@ function App() {
           <ArchitectureDiagram />
         </div>
 
+        {/* Agent Active Badge */}
+        <AgentActiveBadge agentAddr={agentAddr} />
+
         {/* Two wallets */}
         <WalletCards
           agentAddr={agentAddr} agentBal={agentBal}
@@ -599,22 +899,20 @@ function App() {
           </div>
         </div>
 
-        {/* Scenarios */}
-        <InfoPanel icon="🧪" title="Click a scenario to see AgentShield review it" variant="info">
-          <p>
-            Each scenario shows the <strong>AI Agent proposing a transaction</strong>.
-            AgentShield analyzes it on-chain. If the verdict is ALLOW or WARN, the
-            STT transfer executes automatically. If BLOCK, the transfer is rejected.
-          </p>
-        </InfoPanel>
+        {/* Step Indicator */}
+        <StepIndicator activeStep={demoStep} verdict={activeResult?.verdict} />
 
+        {/* Custom Transaction Form */}
+        <CustomTxForm onSubmit={handleCustomTx} busy={busy} />
+
+        {/* Quick Tests */}
         <section>
-          <div className="section-label">Select a transaction to review</div>
-          <div className="demo-grid">
+          <div className="section-label">Quick Tests</div>
+          <div className="demo-grid compact">
             {SCENARIOS.map((s) => (
               <button key={s.label}
                 className={`demo-chip ${s.icon === "✅" ? "allow" : s.icon === "⚠️" ? "warn" : "block"}`}
-                onClick={() => runReview(s)} disabled={busy}
+                onClick={() => runAnalysis(s)} disabled={busy || autoPlaying}
                 aria-label={`Review: ${s.label}`}>
                 <span className="demo-chip-icon">{s.icon}</span>
                 <div className="demo-chip-content">
@@ -627,6 +925,15 @@ function App() {
               </button>
             ))}
           </div>
+          <div style={{ textAlign: "center", marginTop: 12 }}>
+            <button
+              className="btn subtle"
+              onClick={handleAutoPlay}
+              disabled={busy || autoPlaying}
+            >
+              {autoPlaying ? <><span className="spinner" /> Running demo...</> : "▶ Watch Live Demo (auto-play all 3)"}
+            </button>
+          </div>
         </section>
 
         {/* Tx Progress */}
@@ -634,10 +941,20 @@ function App() {
 
         {error && <p className="err" role="alert">{error}</p>}
 
+        {/* Human Approval Card */}
+        {pendingApproval && (
+          <HumanApprovalCard
+            event={pendingApproval.event}
+            onApprove={handleHumanApprove}
+            onReject={handleHumanReject}
+            busy={busy}
+          />
+        )}
+
         {/* Result Card */}
         <div ref={resultRef} id="result-section">
-          {activeResult && <ResultCard event={activeResult} />}
-          {busy && !activeResult && (
+          {activeResult && !pendingApproval && <ResultCard event={activeResult} />}
+          {busy && !activeResult && !pendingApproval && (
             <div className="loading-skeleton" aria-busy="true">
               <div className="skeleton-bar" /><div className="skeleton-line" /><div className="skeleton-line short" />
             </div>
