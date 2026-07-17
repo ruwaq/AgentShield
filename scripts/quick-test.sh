@@ -1,6 +1,6 @@
 #!/bin/bash
 # AgentShield Quick Test — prueba una acción específica desde CLI
-# Uso: source .env && bash scripts/quick-test.sh <test-name>
+# Uso: bash scripts/quick-test.sh <test-name>
 # Tests disponibles:
 #   create-policy  - Crear una policy
 #   allowlist       - Allowlistear target y selector
@@ -10,6 +10,13 @@
 #   scan <id>      - Leer un scan
 #   policy <id>    - Leer una policy
 #   balance        - Ver balance del contrato
+
+# Load environment variables from .env if present
+if [ -f .env ]; then
+  source .env
+elif [ -f ../.env ]; then
+  source ../.env
+fi
 
 set -e
 R="${AGENTSHIELD_REGISTRY:-0xE5F2F5f1D2e635a802e0d649cA769190E7209e80}"
